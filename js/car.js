@@ -44,7 +44,7 @@ const CAR_MODELS = {
   }
 };
 
-const carSVG = (function () {
+const carSVGIso = (function () {
   const SC = 40, C = Math.cos(Math.PI / 6), S = 0.5;
   const P = (x, y, z) => [(x - y) * C * SC, (x + y) * S * SC - z * SC];
   const n3 = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };

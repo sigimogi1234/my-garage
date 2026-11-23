@@ -69,9 +69,20 @@ const blank = () => ({ cars: [], records: [], odos: [], currentCarId: null });
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.cars)) return Object.assign(blank(), s); }
+    if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.cars)) return migrate(Object.assign(blank(), s)); }
   } catch (e) { /* 저장소 접근 불가 */ }
   return blank();
+}
+// 기본 주기가 바뀌었을 때: 사용자가 직접 바꾸지 않은 항목만 새 기본값으로
+function migrate(s) {
+  s.cars.forEach(car => (car.items || []).forEach(it => {
+    if (it.custom) return;
+    const d = DEFAULT_ITEMS.find(x => x.key === it.key), old = LEGACY_DEFAULTS[it.key];
+    if (!d) return;
+    it.name = d.name;
+    if (old && it.km === old[0] && it.months === old[1]) { it.km = d.km; it.months = d.months; }
+  }));
+  return s;
 }
 let state = load();
 let view = 'home';
@@ -128,27 +139,40 @@ function odoState(car) {
 }
 
 /* ───────── 정비 일정 계산 ───────── */
+// 기록 없는 항목의 기준점: 연식 1월 1일 · 0km (연식이 없으면 등록일·등록 시 주행거리)
+function baseline(car) {
+  const y = Number(car.year);
+  if (y > 1980 && y <= new Date().getFullYear() + 1) {
+    const d = `${y}-01-01`;
+    return { date: d > today() ? today() : d, km: 0, virtual: true, label: `${y}년식 출고` };
+  }
+  return { date: car.createdAt, km: car.initialKm || 0, virtual: true, label: '앱 등록 시점' };
+}
+
 function itemStatus(car, item, os) {
   const t = today();
   const hist = carRecords(car).filter(r => r.items.includes(item.key))
     .sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.km - a.km);
-  const last = hist[0] || null;
-  const s = { item, last, hist };
-  if (!last) { s.status = 'none'; s.progress = 0; return s; }
+  // 정비 기록이 없으면 출고(연식) 시점 0km를 기준으로 추정
+  const real = hist[0] || null;
+  const last = real || baseline(car);
+  const first = !real && defOf(item.key) && defOf(item.key).first;
+  const iKm = first ? first.km : item.km, iMo = first ? first.months : item.months;
+  const s = { item, last, hist, estimated: !real, iKm, iMo, first: !!first };
 
   let pk = 0, pt = 0;
   s.usedKm = Math.max(0, os.est - last.km);
   s.elapsedDays = Math.max(0, daysBetween(last.date, t));
-  if (item.km > 0) {
-    s.nextKm = last.km + item.km;
+  if (iKm > 0) {
+    s.nextKm = last.km + iKm;
     s.remainKm = s.nextKm - os.est;
-    pk = (os.est - last.km) / item.km;
+    pk = (os.est - last.km) / iKm;
     s.kmRatio = Math.max(0, pk);
     s.kmDays = s.remainKm > 0 ? Math.ceil(s.remainKm / os.rate.daily) : 0;
     s.kmDate = addDays(t, s.kmDays);
   }
-  if (item.months > 0) {
-    s.nextDate = addMonths(last.date, item.months);
+  if (iMo > 0) {
+    s.nextDate = addMonths(last.date, iMo);
     s.remainDays = daysBetween(t, s.nextDate);
     const total = daysBetween(last.date, s.nextDate);
     pt = total > 0 ? daysBetween(last.date, t) / total : 1;
@@ -332,19 +356,13 @@ function vHome() {
 
 function itemCard(s) {
   const it = s.item;
-  if (s.status === 'none') {
-    return `<article class="item none" data-action="item" data-key="${it.key}" tabindex="0">
-      <span class="ic">${ic(it.icon)}</span>
-      <div class="ib">
-        <div class="ir"><b>${esc(it.name)}</b><span class="pill">기록 없음</span></div>
-        <div class="hint">주기 ${cycleText(it)} · 마지막 정비를 입력하면 일정을 계산해요</div>
-      </div>
-    </article>`;
-  }
+  const sub = s.estimated
+    ? `<small class="est">정비 기록 없음 · ${esc(s.last.label)} 기준 추정</small>`
+    : `<small>최근 정비 ${fmtDate(s.last.date)} · ${fmt(s.last.km)}km</small>`;
   return `<article class="item st-${s.status}" data-action="item" data-key="${it.key}" tabindex="0">
     <div class="item-top">
       <span class="ic">${ic(it.icon)}</span>
-      <b class="item-name">${esc(it.name)}</b>
+      <div class="item-tt"><b>${esc(it.name)}</b>${sub}</div>
       <span class="pill">${STATUS_LABEL[s.status]}</span>
     </div>
     ${gauges(s)}
@@ -352,28 +370,30 @@ function itemCard(s) {
   </article>`;
 }
 
-// 주행거리·기간 게이지 (각각 따로)
+// 주행거리·기간 게이지: 남은 양만큼 차 있는 막대 (여유 파랑 → 임박 노랑 → 초과 빨강)
 const monthsText = d => d < 31 ? `${d}일` : `${Math.floor(d / 30.44)}개월`;
-function gauge(icon, label, ratio, st, value, subL, subR) {
+const leftDays = n => n > 60 ? `${Math.floor(n / 30.44)}개월 남음` : `${n}일 남음`;
+function gauge(label, ratio, st, value, sub) {
+  const w = st === 'over' ? 100 : Math.max(0, Math.min(100, (1 - ratio) * 100));
   return `<div class="g g-${st}">
-    <div class="g-top"><span class="g-l">${ic(icon)}${label}</span><span class="g-v">${value}</span></div>
-    <div class="g-bar"><i style="width:${Math.min(100, ratio * 100).toFixed(1)}%"></i></div>
-    <div class="g-sub"><span>${subL}</span><span>${subR}</span></div>
+    <div class="g-row"><span class="g-l">${label}</span><span class="g-v">${value}</span></div>
+    <div class="g-bar"><i style="width:${w.toFixed(1)}%"></i></div>
+    ${sub ? `<div class="g-sub">${sub}</div>` : ''}
   </div>`;
 }
-function gauges(s) {
-  const it = s.item, out = [];
-  if (it.km > 0) {
+function gauges(s, detail) {
+  const out = [];
+  if (s.iKm > 0) {
     const st = s.remainKm <= 0 ? 'over' : (s.kmRatio >= .85 || s.kmDays <= 30) ? 'soon' : 'ok';
-    out.push(gauge('road', '주행거리', s.kmRatio, st,
-      s.remainKm > 0 ? `<b>${fmt(s.remainKm)}</b>km 남음` : `<b>${fmt(-s.remainKm)}</b>km 초과`,
-      `${fmt(s.usedKm)}km 주행`, `${fmt(it.km)}km`));
+    out.push(gauge('주행거리', s.kmRatio, st,
+      s.remainKm > 0 ? `${fmt(s.remainKm)}km 남음` : `${fmt(-s.remainKm)}km 초과`,
+      detail ? `${fmt(s.usedKm)} / ${fmt(s.iKm)}km 주행` : ''));
   }
-  if (it.months > 0) {
+  if (s.iMo > 0) {
     const st = s.remainDays < 0 ? 'over' : (s.timeRatio >= .85 || s.remainDays <= 30) ? 'soon' : 'ok';
-    out.push(gauge('calendar', '기간', s.timeRatio, st,
-      s.remainDays >= 0 ? `<b>${s.remainDays}</b>일 남음` : `<b>${-s.remainDays}</b>일 지남`,
-      `${monthsText(s.elapsedDays)} 경과`, `${it.months}개월`));
+    out.push(gauge('기간', s.timeRatio, st,
+      s.remainDays >= 0 ? leftDays(s.remainDays) : `${monthsText(-s.remainDays)} 지남`,
+      detail ? `${monthsText(s.elapsedDays)} / ${s.iMo}개월 경과` : ''));
   }
   return `<div class="gs">${out.join('')}</div>`;
 }
@@ -538,7 +558,7 @@ function vSettings() {
           <div class="unit"><input class="num" inputmode="numeric" data-cyc="km" data-key="${it.key}" value="${it.km ? fmt(it.km) : ''}" placeholder="없음"><i>km</i></div>
           <span class="or">또는</span>
           <div class="unit"><input class="num" inputmode="numeric" data-cyc="months" data-key="${it.key}" value="${it.months || ''}" placeholder="없음"><i>개월</i></div>
-        </div>${d && changed ? `<div class="defv">기본값 ${cycleText(d)}</div>` : ''}` : ''}
+        </div>${d && changed ? `<div class="defv">기본값 ${cycleText(d)}</div>` : ''}${d && d.note ? `<div class="defv">${esc(d.note)}</div>` : ''}` : ''}
       </div>`;
     };
     const on = car.items.filter(i => i.enabled), off = car.items.filter(i => !i.enabled);
@@ -752,20 +772,19 @@ function itemSheet(key) {
   const it = car.items.find(i => i.key === key); if (!it) return;
   const body = () => {
     const s = itemStatus(car, it, odoState(car));
-    const pct = Math.min(100, Math.round(s.progress * 100));
-    let info = `<div class="callout">${ic('wrench')}<div><b>아직 정비 기록이 없어요</b><span>마지막으로 정비한 날짜와 주행거리를 입력하면 다음 일정을 계산해드려요.</span></div></div>`;
-    if (s.last) {
-      const dueTxt = s.status === 'over' ? '지금 점검이 필요해요'
-        : s.dueDays != null ? `${fmtDate(s.dueDate)}쯤 (${span(Math.max(0, s.dueDays))} 후) · ${s.dueBy === 'km' ? '주행거리' : '기간'} 기준이 먼저` : '';
-      info = `
-        <div class="due st-${s.status}"><span class="pill">${STATUS_LABEL[s.status]}</span><b>${dueTxt}</b></div>
-        ${gauges(s)}
-        <div class="grid2">
-          <div><small>마지막 정비</small><b>${fmtDate(s.last.date)}</b><span>${fmt(s.last.km)}km</span></div>
-          ${it.km > 0 ? `<div><small>다음 (주행거리)</small><b>${fmt(s.nextKm)}km</b><span>${s.remainKm > 0 ? fmt(s.remainKm) + 'km 남음 · ' + fmtDate(s.kmDate) + ' 예상' : fmt(-s.remainKm) + 'km 초과'}</span></div>` : ''}
-          ${it.months > 0 ? `<div><small>다음 (기간)</small><b>${fmtDate(s.nextDate)}</b><span>${dday(s.remainDays)}</span></div>` : ''}
-        </div>`;
-    }
+    const d = defOf(it.key);
+    const dueTxt = s.status === 'over' ? '지금 교체·점검이 필요해요'
+      : s.dueDays != null ? `${fmtDate(s.dueDate)}쯤 (${span(Math.max(0, s.dueDays))} 후) · ${s.dueBy === 'km' ? '주행거리' : '기간'} 기준이 먼저` : '';
+    const info = `
+      ${s.estimated ? `<div class="callout">${ic('wrench')}<div><b>정비 기록이 없어 ${esc(s.last.label)} 기준으로 추정했어요</b><span>${s.first ? `신차 최초 교체 주기(${cycleText({ km: s.iKm, months: s.iMo })})로 계산했어요. ` : ''}실제로 정비한 적이 있다면 아래 버튼으로 입력하면 정확해져요.</span></div></div>` : ''}
+      <div class="due st-${s.status}"><span class="pill">${STATUS_LABEL[s.status]}</span><b>${dueTxt}</b></div>
+      ${gauges(s, true)}
+      <div class="grid2">
+        <div><small>${s.estimated ? '기준점 (추정)' : '마지막 정비'}</small><b>${fmtDate(s.last.date)}</b><span>${fmt(s.last.km)}km</span></div>
+        ${s.iKm > 0 ? `<div><small>다음 (주행거리)</small><b>${fmt(s.nextKm)}km</b><span>${s.remainKm > 0 ? fmtDate(s.kmDate) + ' 예상' : fmt(-s.remainKm) + 'km 초과'}</span></div>` : ''}
+        ${s.iMo > 0 ? `<div><small>다음 (기간)</small><b>${fmtDate(s.nextDate)}</b><span>${dday(s.remainDays)}</span></div>` : ''}
+      </div>
+      ${d && d.note ? `<p class="note">${ic('check')}<span>${esc(d.note)}</span></p>` : ''}`;
     const hist = s.hist.map(r => `<button class="hrow" data-act="rec" data-id="${r.id}"><span>${fmtDate(r.date)}</span><span>${fmt(r.km)}km</span><b>${r.cost ? won(r.cost) : '-'}</b></button>`).join('');
     return `
       <div class="sheet-head"><span class="ic lg">${ic(it.icon)}</span><div class="grow"><h3>${esc(it.name)}</h3><p>주기 ${cycleText(it)}</p></div><button class="icon-btn" data-close aria-label="닫기">${ic('close')}</button></div>
@@ -780,7 +799,7 @@ function itemSheet(key) {
         </div>
       </div>
       ${hist ? `<div class="sub-h">정비 이력 (${s.hist.length})</div><div class="card list hist">${hist}</div>` : ''}
-      <button class="btn primary full lg" data-act="done">${ic('check')}${s.last ? '정비 완료 기록하기' : '마지막 정비 입력하기'}</button>`;
+      <button class="btn primary full lg" data-act="done">${ic('check')}${s.estimated ? '마지막 정비 입력하기' : '정비 완료 기록하기'}</button>`;
   };
   const w = openSheet(body(), {
     onMount(w) {

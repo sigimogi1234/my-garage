@@ -1,6 +1,6 @@
 // 오프라인 지원: 네트워크 우선, 실패 시 캐시
-const CACHE = 'mygarage-v2';
-const ASSETS = ['./', 'index.html', 'css/style.css', 'js/data.js', 'js/car.js', 'js/app.js', 'icons/icon.svg', 'manifest.webmanifest'];
+const CACHE = 'mygarage-v3';
+const ASSETS = ['./', 'index.html', 'css/style.css', 'js/data.js', 'js/car.js', 'js/car3d.js', 'js/app.js', 'icons/icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
