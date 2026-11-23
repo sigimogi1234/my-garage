@@ -153,26 +153,29 @@ function itemStatus(car, item, os) {
   const t = today();
   const hist = carRecords(car).filter(r => r.items.includes(item.key))
     .sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.km - a.km);
-  // 정비 기록이 없으면 출고(연식) 시점 0km를 기준으로 추정
-  const real = hist[0] || null;
+  // 교체 기록 (점검 후 미루기 기록은 제외). 없으면 출고(연식) 시점 0km를 기준으로 추정
+  const real = hist.find(r => r.kind !== 'defer') || null;
   const last = real || baseline(car);
+  // 마지막 교체 이후의 가장 최근 '다음 주기로 넘기기'
+  const defer = hist[0] && hist[0].kind === 'defer' ? hist[0] : null;
   const first = !real && defOf(item.key) && defOf(item.key).first;
   const iKm = first ? first.km : item.km, iMo = first ? first.months : item.months;
-  const s = { item, last, hist, estimated: !real, iKm, iMo, first: !!first };
+  const s = { item, last, hist, defer, estimated: !real, iKm, iMo, first: !!first };
 
   let pk = 0, pt = 0;
   s.usedKm = Math.max(0, os.est - last.km);
   s.elapsedDays = Math.max(0, daysBetween(last.date, t));
   if (iKm > 0) {
-    s.nextKm = last.km + iKm;
+    s.nextKm = defer ? defer.km + (defer.addKm || 0) : last.km + iKm;
+    s.totalKm = Math.max(1, s.nextKm - last.km);
     s.remainKm = s.nextKm - os.est;
-    pk = (os.est - last.km) / iKm;
+    pk = (os.est - last.km) / s.totalKm;
     s.kmRatio = Math.max(0, pk);
     s.kmDays = s.remainKm > 0 ? Math.ceil(s.remainKm / os.rate.daily) : 0;
     s.kmDate = addDays(t, s.kmDays);
   }
   if (iMo > 0) {
-    s.nextDate = addMonths(last.date, iMo);
+    s.nextDate = defer ? addMonths(defer.date, defer.addMonths || 0) : addMonths(last.date, iMo);
     s.remainDays = daysBetween(t, s.nextDate);
     const total = daysBetween(last.date, s.nextDate);
     pt = total > 0 ? daysBetween(last.date, t) / total : 1;
@@ -183,14 +186,17 @@ function itemStatus(car, item, os) {
   s.dueDays = c.length ? Math.min(...c) : null;
   s.dueBy = s.kmDays != null && (s.remainDays == null || s.kmDays <= s.remainDays) ? 'km' : 'time';
   s.dueDate = s.dueBy === 'km' ? s.kmDate : s.nextDate;
+  // 게이지는 0%에서 차오름: 70% 미만 파랑, 70~90% 주황, 90% 이상 빨강, 100% 이상 초과
   const over = (s.remainKm != null && s.remainKm <= 0) || (s.remainDays != null && s.remainDays < 0);
-  if (s.dueDays == null) s.status = 'ok';
-  else s.status = over ? 'over' : (s.progress >= 0.85 || s.dueDays <= 30) ? 'soon' : 'ok';
+  s.kmLvl = iKm > 0 ? (s.remainKm <= 0 ? 'over' : lvl(pk)) : null;
+  s.timeLvl = iMo > 0 ? (s.remainDays < 0 ? 'over' : lvl(pt)) : null;
+  s.status = over ? 'over' : [s.kmLvl, s.timeLvl].filter(Boolean).sort((a, b) => ORDER[a] - ORDER[b])[0] || 'ok';
   return s;
 }
-const ORDER = { over: 0, soon: 1, ok: 2, none: 3 };
+const lvl = r => r >= 1 ? 'over' : r >= 0.9 ? 'soon' : r >= 0.7 ? 'warn' : 'ok';
+const ORDER = { over: 0, soon: 1, warn: 2, ok: 3 };
 const sortSt = (a, b) => ORDER[a.status] - ORDER[b.status] || (a.dueDays ?? 1e9) - (b.dueDays ?? 1e9);
-const STATUS_LABEL = { over: '점검 필요', soon: '곧 점검', ok: '양호', none: '기록 없음' };
+const STATUS_LABEL = { over: '교체 필요', soon: '곧 교체', warn: '주의', ok: '양호' };
 
 /* ───────── 공통 UI ───────── */
 function toast(msg) {
@@ -317,7 +323,7 @@ function vHome() {
   const os = odoState(car);
   const sts = car.items.filter(i => i.enabled).map(i => itemStatus(car, i, os)).sort(sortSt);
   const over = sts.filter(s => s.status === 'over').length;
-  const soon = sts.filter(s => s.status === 'soon').length;
+  const soon = sts.filter(s => s.status === 'soon' || s.status === 'warn').length;
   const y = String(new Date().getFullYear());
   const yearCost = carRecords(car).filter(r => r.date.startsWith(y)).reduce((a, r) => a + (r.cost || 0), 0);
   const sub = [car.brand, car.model, car.year ? car.year + '년식' : '', fuelName(car.fuel)].filter(Boolean).map(esc).join(' · ');
@@ -343,8 +349,8 @@ function vHome() {
   </section>
 
   <section class="stats">
-    <div class="stat ${over ? 'red' : ''}"><b>${over}</b><span>점검 필요</span></div>
-    <div class="stat ${soon ? 'amber' : ''}"><b>${soon}</b><span>곧 점검</span></div>
+    <div class="stat ${over ? 'red' : ''}"><b>${over}</b><span>교체 필요</span></div>
+    <div class="stat ${soon ? 'amber' : ''}"><b>${soon}</b><span>곧 교체·주의</span></div>
     <div class="stat"><b>${shortWon(yearCost)}</b><span>${y}년 정비비</span></div>
   </section>
 
@@ -358,11 +364,12 @@ function itemCard(s) {
   const it = s.item;
   const sub = s.estimated
     ? `<small class="est">정비 기록 없음 · ${esc(s.last.label)} 기준 추정</small>`
-    : `<small>최근 정비 ${fmtDate(s.last.date)} · ${fmt(s.last.km)}km</small>`;
+    : `<small>최근 교체 ${fmtDate(s.last.date)} · ${fmt(s.last.km)}km</small>`;
+  const dfr = s.defer ? `<small class="dfr-note">${fmtDate(s.defer.date)} 점검 · 다음 주기로 넘김</small>` : '';
   return `<article class="item st-${s.status}" data-action="item" data-key="${it.key}" tabindex="0">
     <div class="item-top">
       <span class="ic">${ic(it.icon)}</span>
-      <div class="item-tt"><b>${esc(it.name)}</b>${sub}</div>
+      <div class="item-tt"><b>${esc(it.name)}</b>${sub}${dfr}</div>
       <span class="pill">${STATUS_LABEL[s.status]}</span>
     </div>
     ${gauges(s)}
@@ -370,11 +377,11 @@ function itemCard(s) {
   </article>`;
 }
 
-// 주행거리·기간 게이지: 남은 양만큼 차 있는 막대 (여유 파랑 → 임박 노랑 → 초과 빨강)
+// 주행거리·기간 게이지: 정비 직후 0%에서 사용한 만큼 차오름
 const monthsText = d => d < 31 ? `${d}일` : `${Math.floor(d / 30.44)}개월`;
 const leftDays = n => n > 60 ? `${Math.floor(n / 30.44)}개월 남음` : `${n}일 남음`;
 function gauge(label, ratio, st, value, sub) {
-  const w = st === 'over' ? 100 : Math.max(0, Math.min(100, (1 - ratio) * 100));
+  const w = Math.max(0, Math.min(100, ratio * 100));
   return `<div class="g g-${st}">
     <div class="g-row"><span class="g-l">${label}</span><span class="g-v">${value}</span></div>
     <div class="g-bar"><i style="width:${w.toFixed(1)}%"></i></div>
@@ -384,16 +391,14 @@ function gauge(label, ratio, st, value, sub) {
 function gauges(s, detail) {
   const out = [];
   if (s.iKm > 0) {
-    const st = s.remainKm <= 0 ? 'over' : (s.kmRatio >= .85 || s.kmDays <= 30) ? 'soon' : 'ok';
-    out.push(gauge('주행거리', s.kmRatio, st,
+    out.push(gauge('주행거리', s.kmRatio, s.kmLvl,
       s.remainKm > 0 ? `${fmt(s.remainKm)}km 남음` : `${fmt(-s.remainKm)}km 초과`,
-      detail ? `${fmt(s.usedKm)} / ${fmt(s.iKm)}km 주행` : ''));
+      detail ? `${fmt(s.usedKm)} / ${fmt(s.totalKm)}km 주행` : ''));
   }
   if (s.iMo > 0) {
-    const st = s.remainDays < 0 ? 'over' : (s.timeRatio >= .85 || s.remainDays <= 30) ? 'soon' : 'ok';
-    out.push(gauge('기간', s.timeRatio, st,
+    out.push(gauge('기간', s.timeRatio, s.timeLvl,
       s.remainDays >= 0 ? leftDays(s.remainDays) : `${monthsText(-s.remainDays)} 지남`,
-      detail ? `${monthsText(s.elapsedDays)} / ${s.iMo}개월 경과` : ''));
+      detail ? `${monthsText(s.elapsedDays)} / ${monthsText(daysBetween(s.last.date, s.nextDate))} 경과` : ''));
   }
   return `<div class="gs">${out.join('')}</div>`;
 }
@@ -430,10 +435,10 @@ function vRecords() {
     return `${head}<article class="rec" data-action="record" data-id="${r.id}" tabindex="0">
       <div class="rec-d"><b>${Number(r.date.slice(8))}</b><span>${WD[parseD(r.date).getDay()]}</span></div>
       <div class="rec-b">
-        <div class="tags">${r.items.map(k => `<span class="tag">${esc(name(k))}</span>`).join('')}</div>
+        <div class="tags">${r.kind === 'defer' ? '<span class="dfr">점검·미룸</span>' : ''}${r.items.map(k => `<span class="tag">${esc(name(k))}</span>`).join('')}</div>
         <div class="rec-m">${fmt(r.km)}km${r.shop ? ' · ' + esc(r.shop) : ''}${r.memo ? ' · ' + esc(r.memo) : ''}</div>
       </div>
-      <div class="rec-c">${r.cost ? won(r.cost) : '-'}</div>
+      <div class="rec-c">${r.kind === 'defer' ? '' : r.cost ? won(r.cost) : '-'}</div>
     </article>`;
   }).join('');
 
@@ -785,7 +790,7 @@ function itemSheet(key) {
         ${s.iMo > 0 ? `<div><small>다음 (기간)</small><b>${fmtDate(s.nextDate)}</b><span>${dday(s.remainDays)}</span></div>` : ''}
       </div>
       ${d && d.note ? `<p class="note">${ic('check')}<span>${esc(d.note)}</span></p>` : ''}`;
-    const hist = s.hist.map(r => `<button class="hrow" data-act="rec" data-id="${r.id}"><span>${fmtDate(r.date)}</span><span>${fmt(r.km)}km</span><b>${r.cost ? won(r.cost) : '-'}</b></button>`).join('');
+    const hist = s.hist.map(r => `<button class="hrow" data-act="rec" data-id="${r.id}"><span>${fmtDate(r.date)}</span><span>${fmt(r.km)}km</span>${r.kind === 'defer' ? '<em class="dfr">점검·미룸</em>' : `<b>${r.cost ? won(r.cost) : '-'}</b>`}</button>`).join('');
     return `
       <div class="sheet-head"><span class="ic lg">${ic(it.icon)}</span><div class="grow"><h3>${esc(it.name)}</h3><p>주기 ${cycleText(it)}</p></div><button class="icon-btn" data-close aria-label="닫기">${ic('close')}</button></div>
       ${info}
@@ -799,14 +804,27 @@ function itemSheet(key) {
         </div>
       </div>
       ${hist ? `<div class="sub-h">정비 이력 (${s.hist.length})</div><div class="card list hist">${hist}</div>` : ''}
-      <button class="btn primary full lg" data-act="done">${ic('check')}${s.estimated ? '마지막 정비 입력하기' : '정비 완료 기록하기'}</button>`;
+      <button class="btn primary full lg" data-act="done">${ic('check')}${s.estimated ? '마지막 교체 입력하기' : '교체 완료 기록하기'}</button>
+      <button class="btn ghost full defer-btn" data-act="defer">점검만 했어요 · 다음 주기로 넘기기</button>`;
   };
   const w = openSheet(body(), {
     onMount(w) {
       w.addEventListener('click', e => {
         const a = e.target.closest('[data-act]'); if (!a) return;
         if (a.dataset.act === 'done') { closeSheet(w); setTimeout(() => recordForm({ key }), 120); }
-        if (a.dataset.act === 'rec') { closeSheet(w); setTimeout(() => recordForm({ id: a.dataset.id }), 120); }
+        if (a.dataset.act === 'defer') { closeSheet(w); setTimeout(() => deferSheet(key), 120); }
+        if (a.dataset.act === 'rec') {
+          const r = state.records.find(x => x.id === a.dataset.id);
+          if (r && r.kind === 'defer') {
+            ask(`${fmtDate(r.date)} '다음 주기로 넘기기' 기록을 삭제할까요?`, '삭제', true).then(ok => {
+              if (!ok) return;
+              state.records = state.records.filter(x => x.id !== r.id);
+              save(); render(); $('.sheet-body', w).innerHTML = body(); toast('삭제했어요');
+            });
+            return;
+          }
+          closeSheet(w); setTimeout(() => recordForm({ id: a.dataset.id }), 120);
+        }
         if (a.dataset.act === 'save-cyc') {
           const km = parseNum($('#ie-km', w).value), mo = parseNum($('#ie-mo', w).value);
           if ((isNaN(km) || !km) && (isNaN(mo) || !mo)) { toast('거리나 기간 중 하나는 입력해주세요'); return; }
@@ -817,6 +835,63 @@ function itemSheet(key) {
     }
   });
   return w;
+}
+
+/* ───────── 시트: 점검만 하고 다음 주기로 넘기기 ───────── */
+function deferSheet(key) {
+  const car = curCar(); if (!car) return;
+  const it = car.items.find(i => i.key === key); if (!it) return;
+  const os = odoState(car);
+  const s = itemStatus(car, it, os);
+  const baseKm = it.km, baseMo = it.months;
+  const opts = [
+    { f: .5, label: '반 주기' },
+    { f: 1, label: '한 주기' }
+  ].map(o => ({ ...o, km: baseKm ? Math.round(baseKm * o.f / 500) * 500 : 0, mo: baseMo ? Math.max(1, Math.round(baseMo * o.f)) : 0 }));
+  let pick = 0;
+  const html = `
+    <div class="sheet-head"><span class="ic lg">${ic(it.icon)}</span><div class="grow"><h3>다음 주기로 넘기기</h3><p>${esc(it.name)}</p></div><button class="icon-btn" data-close aria-label="닫기">${ic('close')}</button></div>
+    <p class="desc">정비소에서 점검했는데 아직 교체 안 해도 된다고 한 경우예요. 교체 기록은 그대로 두고, 다음 교체 시점만 오늘부터 뒤로 미뤄요.</p>
+    <form id="df" class="form" novalidate>
+      <div class="row2">
+        <label class="fld"><span>점검일</span><input type="date" name="date" max="${today()}" value="${today()}"></label>
+        <label class="fld"><span>주행거리</span><div class="unit"><input class="num" name="km" inputmode="numeric" value="${fmt(os.est)}"><i>km</i></div></label>
+      </div>
+      <div class="fld"><span>얼마나 미룰까요?</span>
+        <div class="seg defer-seg">${opts.map((o, i) => `<button type="button" class="${i === pick ? 'on' : ''}" data-i="${i}"><b>${o.label}</b><small>${cycleText({ km: o.km, months: o.mo })}</small></button>`).join('')}</div>
+      </div>
+      <p class="note" id="df-prev"></p>
+      <button class="btn primary full lg" type="submit">다음 주기로 넘기기</button>
+    </form>`;
+  openSheet(html, {
+    onMount(w) {
+      const f = $('#df', w);
+      const preview = () => {
+        const o = opts[pick], km = parseNum(f.km.value), date = f.date.value || today();
+        const parts = [];
+        if (o.km && !isNaN(km)) parts.push(`${fmt(km + o.km)}km`);
+        if (o.mo) parts.push(fmtDate(addMonths(date, o.mo)));
+        $('#df-prev', w).innerHTML = `${ic('check')}<span>다음 교체 시점: <b>${parts.join(' 또는 ')}</b>${parts.length > 1 ? ' 중 먼저 오는 때' : ''}${s.status === 'over' ? '<br>지금 초과 상태가 해제돼요.' : ''}</span>`;
+      };
+      preview();
+      f.addEventListener('input', preview);
+      w.addEventListener('click', e => {
+        const b = e.target.closest('.defer-seg button'); if (!b) return;
+        pick = Number(b.dataset.i);
+        $$('.defer-seg button', w).forEach(x => x.classList.toggle('on', x === b));
+        preview();
+      });
+      f.addEventListener('submit', e => {
+        e.preventDefault();
+        const km = parseNum(f.km.value), date = f.date.value;
+        if (!date || date > today()) { toast('점검일을 확인해주세요'); return; }
+        if (isNaN(km)) { toast('주행거리를 입력해주세요'); return; }
+        const o = opts[pick];
+        state.records.push({ id: uid(), carId: car.id, date, km, items: [key], kind: 'defer', addKm: o.km, addMonths: o.mo, cost: 0, shop: '', memo: '점검 후 다음 주기로 넘김' });
+        save(); closeSheet(w); render(); toast('다음 주기로 넘겼어요');
+      });
+    }
+  });
 }
 
 /* ───────── 시트: 커스텀 항목 ───────── */
@@ -961,7 +1036,15 @@ document.addEventListener('click', e => {
     case 'edit-car': carForm(el.dataset.id); break;
     case 'odo': odoForm(); break;
     case 'add-record': recordForm(); break;
-    case 'record': recordForm({ id: el.dataset.id }); break;
+    case 'record': {
+      const r = state.records.find(x => x.id === el.dataset.id);
+      if (r && r.kind === 'defer') {
+        ask(`${fmtDate(r.date)} '다음 주기로 넘기기' 기록을 삭제할까요?`, '삭제', true).then(ok => {
+          if (ok) { state.records = state.records.filter(x => x.id !== r.id); save(); render(); toast('삭제했어요'); }
+        });
+      } else recordForm({ id: el.dataset.id });
+      break;
+    }
     case 'item': itemSheet(el.dataset.key); break;
     case 'demo': loadDemo(); break;
     case 'rate-mode': car.rateMode = el.dataset.mode; save(); render(); break;
