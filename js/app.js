@@ -137,10 +137,13 @@ function itemStatus(car, item, os) {
   if (!last) { s.status = 'none'; s.progress = 0; return s; }
 
   let pk = 0, pt = 0;
+  s.usedKm = Math.max(0, os.est - last.km);
+  s.elapsedDays = Math.max(0, daysBetween(last.date, t));
   if (item.km > 0) {
     s.nextKm = last.km + item.km;
     s.remainKm = s.nextKm - os.est;
     pk = (os.est - last.km) / item.km;
+    s.kmRatio = Math.max(0, pk);
     s.kmDays = s.remainKm > 0 ? Math.ceil(s.remainKm / os.rate.daily) : 0;
     s.kmDate = addDays(t, s.kmDays);
   }
@@ -149,6 +152,7 @@ function itemStatus(car, item, os) {
     s.remainDays = daysBetween(t, s.nextDate);
     const total = daysBetween(last.date, s.nextDate);
     pt = total > 0 ? daysBetween(last.date, t) / total : 1;
+    s.timeRatio = Math.max(0, pt);
   }
   s.progress = Math.max(pk, pt, 0);
   const c = [s.kmDays, s.remainDays].filter(v => v != null);
@@ -179,8 +183,60 @@ function openSheet(html, { full = false, onMount } = {}) {
   document.body.classList.add('lock');
   requestAnimationFrame(() => requestAnimationFrame(() => w.classList.add('open')));
   w.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(w); });
+  enableSwipe(w);
   onMount && onMount(w);
   return w;
+}
+
+// 아래로 쓸어내려 닫기: 손잡이/제목에서 시작하거나, 내용이 맨 위일 때 아래로 당기면 동작
+function enableSwipe(w) {
+  const sheet = $('.sheet', w), back = $('.sheet-backdrop', w);
+  let y0 = null, dy = 0, dragging = false, fromHead = false, lastY = 0, lastT = 0, vel = 0;
+  const start = (y, target) => {
+    fromHead = !!target.closest('.sheet-grip, .sheet-head');
+    if (!fromHead && sheet.scrollTop > 0) { y0 = null; return; }
+    if (!fromHead && target.closest('textarea')) { y0 = null; return; }
+    y0 = y; dy = 0; dragging = false; lastY = y; lastT = performance.now(); vel = 0;
+  };
+  const move = (y, ev) => {
+    if (y0 == null) return;
+    const d = y - y0;
+    if (!dragging) {
+      if (d > 8 && (fromHead || sheet.scrollTop <= 0)) {
+        dragging = true; y0 = y; sheet.classList.add('dragging'); back.style.transition = 'none';
+        if (document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
+      } else if (d < -8) { y0 = null; return; }
+      else return;
+    }
+    if (ev.cancelable) ev.preventDefault();
+    dy = Math.max(0, y - y0);
+    const now = performance.now();
+    vel = (y - lastY) / Math.max(1, now - lastT); lastY = y; lastT = now;
+    sheet.style.transform = `translateY(${dy}px)`;
+    back.style.opacity = String(Math.max(0, 1 - dy / sheet.offsetHeight));
+  };
+  const end = () => {
+    if (y0 == null) return;
+    y0 = null;
+    if (!dragging) return;
+    dragging = false;
+    sheet.classList.remove('dragging'); back.style.transition = '';
+    const close = dy > Math.min(160, sheet.offsetHeight * 0.3) || (vel > 0.5 && dy > 30);
+    sheet.style.transform = ''; back.style.opacity = '';
+    if (close) closeSheet(w);
+  };
+  sheet.addEventListener('touchstart', e => { if (e.touches.length === 1) start(e.touches[0].clientY, e.target); }, { passive: true });
+  sheet.addEventListener('touchmove', e => move(e.touches[0].clientY, e), { passive: false });
+  sheet.addEventListener('touchend', end);
+  sheet.addEventListener('touchcancel', end);
+  // PC 마우스: 손잡이/제목 드래그
+  sheet.addEventListener('mousedown', e => {
+    if (!e.target.closest('.sheet-grip, .sheet-head') || e.target.closest('button')) return;
+    start(e.clientY, e.target);
+    const mm = ev => move(ev.clientY, ev);
+    const mu = () => { end(); window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', mu); };
+    window.addEventListener('mousemove', mm); window.addEventListener('mouseup', mu);
+  });
 }
 function closeSheet(w) {
   w.classList.remove('open');
@@ -285,27 +341,46 @@ function itemCard(s) {
       </div>
     </article>`;
   }
-  const pct = Math.min(100, Math.round(s.progress * 100));
-  const kmCell = it.km > 0 ? `
-    <div class="cell ${s.dueBy === 'km' ? 'lead' : ''}">
-      <small>${ic('road')}주행거리</small>
-      <strong>${s.remainKm > 0 ? fmt(s.remainKm) + 'km 남음' : fmt(-s.remainKm) + 'km 초과'}</strong>
-      <em>${fmt(s.nextKm)}km${s.remainKm > 0 ? ' · ' + fmtDate(s.kmDate) + ' 예상' : ''}</em>
-    </div>` : '';
-  const tCell = it.months > 0 ? `
-    <div class="cell ${s.dueBy === 'time' ? 'lead' : ''}">
-      <small>${ic('calendar')}기간</small>
-      <strong>${dday(s.remainDays)}</strong>
-      <em>${fmtDate(s.nextDate)}까지</em>
-    </div>` : '';
   return `<article class="item st-${s.status}" data-action="item" data-key="${it.key}" tabindex="0">
-    <span class="ic">${ic(it.icon)}</span>
-    <div class="ib">
-      <div class="ir"><b>${esc(it.name)}</b><span class="pill">${STATUS_LABEL[s.status]}</span></div>
-      <div class="bar"><i style="width:${pct}%"></i></div>
-      <div class="cells">${kmCell}${tCell}</div>
+    <div class="item-top">
+      <span class="ic">${ic(it.icon)}</span>
+      <b class="item-name">${esc(it.name)}</b>
+      <span class="pill">${STATUS_LABEL[s.status]}</span>
     </div>
+    ${gauges(s)}
+    ${dueLine(s)}
   </article>`;
+}
+
+// 주행거리·기간 게이지 (각각 따로)
+const monthsText = d => d < 31 ? `${d}일` : `${Math.floor(d / 30.44)}개월`;
+function gauge(icon, label, ratio, st, value, subL, subR) {
+  return `<div class="g g-${st}">
+    <div class="g-top"><span class="g-l">${ic(icon)}${label}</span><span class="g-v">${value}</span></div>
+    <div class="g-bar"><i style="width:${Math.min(100, ratio * 100).toFixed(1)}%"></i></div>
+    <div class="g-sub"><span>${subL}</span><span>${subR}</span></div>
+  </div>`;
+}
+function gauges(s) {
+  const it = s.item, out = [];
+  if (it.km > 0) {
+    const st = s.remainKm <= 0 ? 'over' : (s.kmRatio >= .85 || s.kmDays <= 30) ? 'soon' : 'ok';
+    out.push(gauge('road', '주행거리', s.kmRatio, st,
+      s.remainKm > 0 ? `<b>${fmt(s.remainKm)}</b>km 남음` : `<b>${fmt(-s.remainKm)}</b>km 초과`,
+      `${fmt(s.usedKm)}km 주행`, `${fmt(it.km)}km`));
+  }
+  if (it.months > 0) {
+    const st = s.remainDays < 0 ? 'over' : (s.timeRatio >= .85 || s.remainDays <= 30) ? 'soon' : 'ok';
+    out.push(gauge('calendar', '기간', s.timeRatio, st,
+      s.remainDays >= 0 ? `<b>${s.remainDays}</b>일 남음` : `<b>${-s.remainDays}</b>일 지남`,
+      `${monthsText(s.elapsedDays)} 경과`, `${it.months}개월`));
+  }
+  return `<div class="gs">${out.join('')}</div>`;
+}
+function dueLine(s) {
+  if (s.dueDays == null) return '';
+  if (s.status === 'over') return `<div class="due-line over">${ic('wrench')}<span>지금 교체·점검이 필요해요</span></div>`;
+  return `<div class="due-line">${ic('check')}<span>다음 교체 예상 <b>${fmtDate(s.dueDate)}</b> · ${span(Math.max(0, s.dueDays))} 후 (${s.dueBy === 'km' ? '주행거리' : '기간'} 기준)</span></div>`;
 }
 
 /* ───────── 화면: 정비 내역 ───────── */
@@ -684,7 +759,7 @@ function itemSheet(key) {
         : s.dueDays != null ? `${fmtDate(s.dueDate)}쯤 (${span(Math.max(0, s.dueDays))} 후) · ${s.dueBy === 'km' ? '주행거리' : '기간'} 기준이 먼저` : '';
       info = `
         <div class="due st-${s.status}"><span class="pill">${STATUS_LABEL[s.status]}</span><b>${dueTxt}</b></div>
-        <div class="bar lg st-${s.status}"><i style="width:${pct}%"></i></div>
+        ${gauges(s)}
         <div class="grid2">
           <div><small>마지막 정비</small><b>${fmtDate(s.last.date)}</b><span>${fmt(s.last.km)}km</span></div>
           ${it.km > 0 ? `<div><small>다음 (주행거리)</small><b>${fmt(s.nextKm)}km</b><span>${s.remainKm > 0 ? fmt(s.remainKm) + 'km 남음 · ' + fmtDate(s.kmDate) + ' 예상' : fmt(-s.remainKm) + 'km 초과'}</span></div>` : ''}

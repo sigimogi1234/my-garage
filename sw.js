@@ -1,5 +1,5 @@
 // 오프라인 지원: 네트워크 우선, 실패 시 캐시
-const CACHE = 'mygarage-v1';
+const CACHE = 'mygarage-v2';
 const ASSETS = ['./', 'index.html', 'css/style.css', 'js/data.js', 'js/car.js', 'js/app.js', 'icons/icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', e => {
