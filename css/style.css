@@ -557,3 +557,135 @@ img.car-svg { display: block; width: 100%; height: auto; user-select: none; -web
 .defer-seg button small { font-size: 11.5px; font-weight: 600; color: var(--muted); }
 .defer-seg button.on small { color: var(--blue-d); }
 .form .note { margin: 0; }
+
+/* ═════════ v5: Liquid Glass ═════════ */
+:root {
+  --bg: #EEF2FA;
+  --glass: rgba(255, 255, 255, .62);
+  --glass-hi: rgba(255, 255, 255, .78);
+  --glass-line: rgba(255, 255, 255, .9);
+  --glass-shadow: 0 10px 30px rgba(28, 56, 130, .09), 0 1px 2px rgba(28, 56, 130, .06);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 -1px 0 rgba(255, 255, 255, .35), inset 0 0 0 1px rgba(255, 255, 255, .55);
+}
+html { background: var(--bg); }
+body { background: var(--bg); overscroll-behavior-y: none; }
+/* 유리 뒤로 은은하게 비치는 컬러 블롭 */
+body::before {
+  content: ''; position: fixed; inset: -10%; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(38% 30% at 12% 8%, rgba(120, 170, 255, .42), transparent 70%),
+    radial-gradient(34% 28% at 92% 22%, rgba(186, 160, 255, .32), transparent 70%),
+    radial-gradient(40% 32% at 80% 78%, rgba(120, 214, 255, .30), transparent 70%),
+    radial-gradient(36% 30% at 8% 88%, rgba(150, 190, 255, .30), transparent 70%),
+    var(--bg);
+}
+
+/* 유리 표면 공통 */
+.hero, .stat, .item, .card, .rec, .sw, .btn.ghost, .icon-btn, .chip, .body-opt, .seg {
+  background: var(--glass);
+  border: 0;
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+  -webkit-backdrop-filter: saturate(170%) blur(14px);
+  backdrop-filter: saturate(170%) blur(14px);
+}
+.hero { background: linear-gradient(180deg, rgba(255,255,255,.5), rgba(255,255,255,.72)); border-radius: 30px; }
+.item, .card, .rec { background: var(--glass-hi); }
+.icon-btn { background: rgba(255, 255, 255, .55); }
+.item.st-over { box-shadow: var(--glass-shadow), var(--glass-inset), inset 0 0 0 1.5px rgba(239, 68, 68, .28); }
+
+/* 히어로: 유리 스테이지 + 바닥 반사 */
+.stage {
+  background:
+    radial-gradient(60% 55% at 50% 40%, rgba(255, 255, 255, .9), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(180deg, rgba(214, 228, 255, .55), rgba(255, 255, 255, 0));
+}
+.stage-car img.car-svg { -webkit-box-reflect: below -34px linear-gradient(transparent 62%, rgba(255, 255, 255, .22)); }
+.badge { background: rgba(255, 255, 255, .6); border: 0; box-shadow: var(--glass-inset); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.odo-card {
+  background: linear-gradient(135deg, rgba(222, 233, 255, .85), rgba(236, 242, 255, .6));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 0 0 1px rgba(255, 255, 255, .6);
+}
+
+/* 광택 버튼 */
+.btn.primary, .fab {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .28) 0%, rgba(255, 255, 255, 0) 52%),
+    linear-gradient(180deg, #4C84FF, #2A63EC);
+  box-shadow: 0 8px 22px rgba(46, 108, 246, .32), inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 -1px 0 rgba(0, 30, 120, .2);
+}
+.btn.danger { box-shadow: 0 8px 22px rgba(239, 68, 68, .28), inset 0 1px 0 rgba(255, 255, 255, .45); }
+.fab { bottom: calc(var(--tab-h) + var(--safe-b) + 26px); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+
+/* 차량 스위처 */
+.sw { border: 0; }
+.sw.on {
+  background: linear-gradient(180deg, rgba(40, 52, 74, .92), rgba(14, 23, 38, .92));
+  box-shadow: 0 6px 16px rgba(14, 23, 38, .22), inset 0 1px 0 rgba(255, 255, 255, .25);
+}
+.sw.add { background: rgba(255, 255, 255, .35); box-shadow: inset 0 0 0 1.5px rgba(46, 108, 246, .25); }
+
+/* 칩/세그먼트 선택 상태 */
+.chip { border: 0; }
+.chip.on, .body-opt.on {
+  background: rgba(46, 108, 246, .12);
+  box-shadow: inset 0 0 0 1.5px rgba(46, 108, 246, .55), inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+.seg { background: rgba(255, 255, 255, .4); }
+.seg button.on { background: rgba(255, 255, 255, .92); box-shadow: 0 2px 8px rgba(28, 56, 130, .12), inset 0 1px 0 #fff; }
+
+/* 게이지 트랙: 오목한 유리 홈 */
+.g-bar { background: rgba(214, 222, 236, .7); box-shadow: inset 0 1px 2px rgba(28, 56, 130, .12); }
+.g-bar i { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45); }
+
+/* 입력창 */
+.fld input:not([type=checkbox]), .fld textarea, .unit input, .bk {
+  background: rgba(255, 255, 255, .6); border-color: rgba(255, 255, 255, .9);
+  box-shadow: inset 0 1px 3px rgba(28, 56, 130, .08);
+}
+
+/* 떠 있는 유리 탭바 */
+.tabbar {
+  left: 50%; right: auto; bottom: calc(10px + var(--safe-b));
+  width: min(456px, calc(100% - 24px)); transform: translateX(-50%);
+  height: var(--tab-h); padding: 6px; border: 0; border-radius: 30px;
+  gap: 4px;
+  background: rgba(255, 255, 255, .55);
+  -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
+  box-shadow: 0 12px 34px rgba(28, 56, 130, .16), inset 0 1px 0 rgba(255, 255, 255, .95), inset 0 0 0 1px rgba(255, 255, 255, .6);
+}
+@media (min-width: 520px) { .tabbar { border: 0; border-radius: 30px; } }
+.tabbar button { border-radius: 24px; transition: background .2s ease; }
+.tabbar button.on {
+  background: rgba(46, 108, 246, .1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 0 0 1px rgba(46, 108, 246, .12);
+  color: var(--blue-d);
+}
+
+/* 시트·토스트 */
+.sheet {
+  background: rgba(250, 252, 255, .84);
+  -webkit-backdrop-filter: saturate(180%) blur(28px); backdrop-filter: saturate(180%) blur(28px);
+  box-shadow: 0 -10px 40px rgba(28, 56, 130, .14), inset 0 1px 0 rgba(255, 255, 255, .95);
+}
+.sheet-backdrop { background: rgba(20, 32, 60, .28); }
+#toast {
+  background: rgba(20, 28, 44, .72);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 8px 24px rgba(0, 0, 0, .18);
+}
+
+/* 당겨서 새로고침 표시 */
+#ptr {
+  position: fixed; z-index: 60; left: 50%; top: calc(env(safe-area-inset-top, 0px) - 44px);
+  width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
+  transform: translate(-50%, 0); opacity: 0; pointer-events: none; color: var(--muted);
+  background: rgba(255, 255, 255, .7);
+  -webkit-backdrop-filter: saturate(180%) blur(16px); backdrop-filter: saturate(180%) blur(16px);
+  box-shadow: 0 6px 18px rgba(28, 56, 130, .16), inset 0 1px 0 #fff, inset 0 0 0 1px rgba(255, 255, 255, .6);
+}
+#ptr svg { width: 20px; height: 20px; }
+#ptr.ready { color: var(--blue); }
+#ptr.loading svg { animation: ptrspin .7s linear infinite; }
+@keyframes ptrspin { to { transform: rotate(360deg); } }
+.stage { padding-bottom: 26px; }
+.stage-car img.car-svg { -webkit-box-reflect: below -40px linear-gradient(transparent 76%, rgba(255, 255, 255, .16)); }

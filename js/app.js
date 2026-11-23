@@ -1106,6 +1106,52 @@ document.addEventListener('change', e => {
   }
 });
 
+// 당겨서 새로고침 (홈 화면에 추가한 앱에서도 동작)
+(function pullToRefresh() {
+  const el = $('#ptr'); if (!el) return;
+  const icon = $('svg', el);
+  const MAX = 110, GO = 70;
+  let x0 = 0, y0 = null, pull = 0, active = false;
+  const reset = () => {
+    el.style.transition = 'transform .25s ease, opacity .25s ease';
+    el.style.transform = ''; el.style.opacity = '';
+    el.classList.remove('ready');
+    setTimeout(() => { el.style.transition = ''; }, 260);
+  };
+  window.addEventListener('touchstart', e => {
+    y0 = null;
+    if (e.touches.length !== 1 || window.scrollY > 0 || $('.sheet-wrap')) return;
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; pull = 0; active = false;
+  }, { passive: true });
+  window.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
+    if (!active) {
+      if (dy > 8 && dy > Math.abs(dx) * 1.5 && window.scrollY <= 0) active = true;
+      else if (dy < 0 || Math.abs(dx) > 8) { y0 = null; return; }
+      else return;
+    }
+    if (e.cancelable) e.preventDefault();
+    pull = Math.min(MAX, Math.max(0, dy) * 0.5);
+    el.style.transform = `translate(-50%, ${pull}px)`;
+    el.style.opacity = String(Math.min(1, pull / 45));
+    icon.style.transform = `rotate(${pull * 3.2}deg)`;
+    el.classList.toggle('ready', pull >= GO);
+  }, { passive: false });
+  window.addEventListener('touchend', () => {
+    if (y0 == null) return;
+    y0 = null;
+    if (!active) return;
+    active = false;
+    if (pull >= GO) {
+      el.classList.add('loading');
+      el.style.transition = 'transform .2s ease';
+      el.style.transform = `translate(-50%, ${GO - 10}px)`;
+      setTimeout(() => location.reload(), 380);
+    } else reset();
+  });
+})();
+
 const initial = location.hash.slice(1);
 if (VIEWS[initial]) view = initial;
 if (new URLSearchParams(location.search).has('demo') && !state.cars.length) loadDemo();

@@ -88,7 +88,7 @@ void main(){
       bool win=p.y>uBody.w+.05&&p.y<uCab.w-.1&&abs(n.y)<.78;
       if(az>.3&&az<.86) win=false;
       if(az>.86&&(abs(p.x-uExtra.w)<.06||abs(p.x-uExtra2.x)<.06)) win=false;
-      if(win){base=mix(vec3(.22,.36,.6),vec3(.72,.85,1.),clamp(n.y*.6+.5,0.,1.));gloss=1.8;}
+      if(win){base=mix(vec3(.14,.24,.42),vec3(.5,.68,.94),clamp(n.y*.6+.5,0.,1.));gloss=1.8;}
       else if(n.x>.55){
         if(abs(p.z)<.27&&p.y>uBody.z+.12&&p.y<uBody.z+.26){base=vec3(.97);gloss=.4;}
         else if(abs(p.z)<uBody.y-.6&&abs(p.y-(uBody.w-.2))<.055){base=vec3(.14,.16,.2);gloss=.6;}
@@ -110,7 +110,13 @@ void main(){
     vec3 sky=vec3(.9,.94,1.), gnd=vec3(.62,.58,.56);
     vec3 amb=mix(gnd,sky,clamp(n.y*.5+.5,0.,1.));
     vec3 c=lin*(amb*.66*occ+vec3(1.,.96,.9)*dif*.9)+lin*emis;
-    c+=spe*.5+sky*fre*.24*occ*min(gloss,1.)+pow(clamp(n.y,0.,1.),3.)*.06*occ;
+    // 클리어코트/유리 반사: 하늘 그라디언트 + 소프트박스 띠
+    vec3 R=reflect(rd,n);
+    vec3 env=mix(vec3(.55,.58,.66),vec3(1.,1.,1.04),smoothstep(-.25,.45,R.y));
+    env+=vec3(1.)*exp(-pow((R.y-.5)*6.,2.))*.6;
+    float kr=(.05+.6*fre)*min(gloss,1.6);
+    c=mix(c,env*occ,clamp(kr,0.,.85));
+    c+=spe*.55+pow(clamp(n.y,0.,1.),3.)*.05*occ;
     c=c/(1.+c*.12);
     outc=vec4(pow(c,vec3(1./2.2)),1.);
   } else if(tg<1e8){
