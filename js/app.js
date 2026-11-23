@@ -342,7 +342,7 @@ function vHome() {
       <div class="odo-l">
         <span class="lbl">오늘 예상 주행거리</span>
         <div class="odo-num">${fmt(os.est)}<small>km</small></div>
-        <span class="meta">최근 입력 ${fmt(os.last.km)}km · ${os.since === 0 ? '오늘' : os.since + '일 전'} · 하루 약 ${fmt(os.rate.daily)}km (${rateSrc})</span>
+        ${os.since >= 7 ? `<span class="meta">마지막 입력 ${os.since}일 전 · 지금 입력하면 더 정확해져요</span>` : ''}
       </div>
       <button class="btn primary sm" data-action="odo">${ic('gauge')}입력</button>
     </div>
